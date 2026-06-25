@@ -1,10 +1,15 @@
 mod matching_engine;
 mod ws;
 use crate::{
-    matching_engine::{EngineCommand, Order, Side::Buy, run_matching_engine},
+    matching_engine::{
+        EngineCommand, Order,
+        Side::{self},
+        run_matching_engine,
+    },
     ws::{WsState, ws_handler},
 };
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web};
+use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 
 #[get("/")]
@@ -26,16 +31,41 @@ async fn get_orderbook(engine_tx: web::Data<mpsc::Sender<EngineCommand>>) -> imp
     HttpResponse::Ok().json(snapshot)
 }
 
-#[post("/orders")]
-async fn post_order(req_body: String, order_tx: web::Data<mpsc::Sender<Order>>) -> impl Responder {
-    let order = Order {
-        id: 1,
-        side: Buy,
-        price: 100,
-        qty: 10,
-    };
+#[derive(Deserialize)]
+pub struct OrderRequest {
+    pub id: u64,
+    pub side: String,
+    pub price: u64,
+    pub qty: u64,
+}
 
-    order_tx.send(order).await.unwrap();
+impl From<OrderRequest> for Order {
+    fn from(req: OrderRequest) -> Self {
+        let side = match req.side.to_lowercase().as_str() {
+            "buy" => Side::Buy,
+            "sell" => Side::Sell,
+            _ => panic!("invalid side"),
+        };
+
+        Order {
+            id: req.id,
+            side,
+            price: req.price,
+            qty: req.qty,
+        }
+    }
+}
+
+#[post("/orders")]
+async fn post_order(
+    order_req: web::Json<OrderRequest>,
+    engine_tx: web::Data<mpsc::Sender<EngineCommand>>,
+) -> impl Responder {
+    let order: Order = order_req.into_inner().into();
+
+    if let Err(_) = engine_tx.send(EngineCommand::NewOrder(order)).await {
+        return HttpResponse::InternalServerError().body("Engine unavailable");
+    }
 
     HttpResponse::Ok().body("Order sent to engine")
 }

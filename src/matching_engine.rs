@@ -49,6 +49,26 @@ impl Orderbook {
     pub fn match_order(&mut self, mut order: Order) -> Vec<Fill> {
         let mut fills = Vec::new();
 
+        match order.side {
+            Side::Buy => {
+                if order.qty > 0 {
+                    self.bids
+                        .entry(order.price)
+                        .or_insert_with(VecDeque::new)
+                        .push_back(order);
+                }
+            }
+
+            Side::Sell => {
+                if order.qty > 0 {
+                    self.asks
+                        .entry(order.price)
+                        .or_insert_with(VecDeque::new)
+                        .push_back(order);
+                }
+            }
+        }
+
         fills
     }
 
