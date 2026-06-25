@@ -51,6 +51,40 @@ impl Orderbook {
 
         match order.side {
             Side::Buy => {
+                while order.qty > 0 {
+                    let best_price = match self.asks.keys().next().cloned() {
+                        Some(p) if p <= order.price => p,
+                        _ => break,
+                    };
+
+                    let queue = self.asks.get_mut(&best_price).unwrap();
+
+                    while order.qty > 0 && !queue.is_empty() {
+                        let mut top = queue.pop_front().unwrap();
+
+                        let traded_qty = order.qty.min(top.qty);
+
+                        fills.push(Fill {
+                            maker_order_id: top.id,
+                            taker_order_id: order.id,
+                            price: best_price,
+                            qty: traded_qty,
+                        });
+
+                        order.qty -= traded_qty;
+                        top.qty -= traded_qty;
+
+                        if top.qty > 0 {
+                            queue.push_front(top);
+                            break;
+                        }
+                    }
+
+                    if queue.is_empty() {
+                        self.asks.remove(&best_price);
+                    }
+                }
+
                 if order.qty > 0 {
                     self.bids
                         .entry(order.price)
@@ -60,6 +94,40 @@ impl Orderbook {
             }
 
             Side::Sell => {
+                while order.qty > 0 {
+                    let best_price = match self.bids.keys().next_back().cloned() {
+                        Some(p) if p >= order.price => p,
+                        _ => break,
+                    };
+
+                    let queue = self.bids.get_mut(&best_price).unwrap();
+
+                    while order.qty > 0 && !queue.is_empty() {
+                        let mut top = queue.pop_front().unwrap();
+
+                        let traded_qty = order.qty.min(top.qty);
+
+                        fills.push(Fill {
+                            maker_order_id: top.id,
+                            taker_order_id: order.id,
+                            price: best_price,
+                            qty: traded_qty,
+                        });
+
+                        order.qty -= traded_qty;
+                        top.qty -= traded_qty;
+
+                        if top.qty > 0 {
+                            queue.push_front(top);
+                            break;
+                        }
+                    }
+
+                    if queue.is_empty() {
+                        self.bids.remove(&best_price);
+                    }
+                }
+
                 if order.qty > 0 {
                     self.asks
                         .entry(order.price)
