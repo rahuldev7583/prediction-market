@@ -1,3 +1,4 @@
+mod matching_engine;
 mod ws;
 use crate::ws::{WsState, ws_handler};
 use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web};
