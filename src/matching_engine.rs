@@ -1,8 +1,18 @@
-use std::{
-    collections::{BTreeMap, VecDeque},
-    sync::mpsc::{Receiver, Sender},
-};
-use tokio::sync::{broadcast, mpsc};
+use serde::Serialize;
+use std::collections::{BTreeMap, VecDeque};
+use tokio::sync::{broadcast, mpsc, oneshot};
+
+#[derive(Serialize)]
+pub struct OrderbookLevel {
+    pub price: u64,
+    pub qty: u64,
+}
+
+#[derive(Serialize)]
+pub struct OrderbookSnapshot {
+    pub bids: Vec<OrderbookLevel>,
+    pub asks: Vec<OrderbookLevel>,
+}
 
 pub enum Side {
     Buy,
@@ -36,30 +46,63 @@ impl Orderbook {
             asks: BTreeMap::new(),
         }
     }
-    pub fn match_order(&mut self, order: Order) -> Vec<Fill> {
-        vec![Fill {
-            maker_order_id: order.id,
-            taker_order_id: order.id,
-            price: order.price,
-            qty: order.qty,
-        }]
+    pub fn match_order(&mut self, mut order: Order) -> Vec<Fill> {
+        let mut fills = Vec::new();
+
+        fills
+    }
+
+    pub fn snapshot(&self) -> OrderbookSnapshot {
+        let bids = self
+            .bids
+            .iter()
+            .rev()
+            .map(|(price, orders)| OrderbookLevel {
+                price: *price,
+                qty: orders.iter().map(|o| o.qty).sum(),
+            })
+            .collect();
+
+        let asks = self
+            .asks
+            .iter()
+            .map(|(price, orders)| OrderbookLevel {
+                price: *price,
+                qty: orders.iter().map(|o| o.qty).sum(),
+            })
+            .collect();
+
+        OrderbookSnapshot { bids, asks }
     }
 }
 
+pub enum EngineCommand {
+    NewOrder(Order),
+    GetSnapshot(oneshot::Sender<OrderbookSnapshot>),
+}
+
 pub async fn run_matching_engine(
-    mut rx: mpsc::Receiver<Order>,
+    mut rx: mpsc::Receiver<EngineCommand>,
     fill_tx: broadcast::Sender<String>,
 ) {
     let mut orderbook = Orderbook::new();
 
     loop {
-        let order = rx.recv().await.expect("error while getting order");
-
-        let fills = orderbook.match_order(order);
-
-        for f in fills {
-            let msg = format!("{:?}", f);
-            let _ = fill_tx.send(msg);
+        let cmd = match rx.recv().await {
+            Some(c) => c,
+            None => break,
+        };
+        match cmd {
+            EngineCommand::NewOrder(order) => {
+                let fills = orderbook.match_order(order);
+                for f in fills {
+                    let _ = fill_tx.send(format!("{:?}", f));
+                }
+            }
+            EngineCommand::GetSnapshot(resp_tx) => {
+                let snapshot = orderbook.snapshot();
+                let _ = resp_tx.send(snapshot);
+            }
         }
     }
 }
