@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     sync::mpsc::{Receiver, Sender},
 };
+use tokio::sync::{broadcast, mpsc};
 
 pub enum Side {
     Buy,
@@ -45,15 +46,20 @@ impl Orderbook {
     }
 }
 
-pub async fn run_matching_engine(rx: Receiver<Order>, fills_tx: Sender<String>) {
+pub async fn run_matching_engine(
+    mut rx: mpsc::Receiver<Order>,
+    fill_tx: broadcast::Sender<String>,
+) {
     let mut orderbook = Orderbook::new();
 
-    let order = rx.recv().expect("failed to receive");
+    loop {
+        let order = rx.recv().await.expect("error while getting order");
 
-    let fills = orderbook.match_order(order);
+        let fills = orderbook.match_order(order);
 
-    for f in fills {
-        let msg = format!("fill{:?}", f);
-        let _ = fills_tx.send(msg);
+        for f in fills {
+            let msg = format!("{:?}", f);
+            let _ = fill_tx.send(msg);
+        }
     }
 }
